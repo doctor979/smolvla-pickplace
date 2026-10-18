@@ -1,0 +1,78 @@
+{
+  "tag": "A40k",
+  "ckpt": "outputs/expA_train40/checkpoints/040000/pretrained_model",
+  "device": "cuda",
+  "chunk_size": 50,
+  "n_action_steps": 50,
+  "fps": 30,
+  "chunk_duration_s": 1.667,
+  "iters": 30,
+  "rows": [
+    {
+      "batch": 1,
+      "mode": "policy",
+      "n": 30,
+      "median_ms": 225.0,
+      "p90_ms": 262.94,
+      "min_ms": 219.07,
+      "per_frame_ms": 225.0,
+      "throughput_fps": 4.4,
+      "peak_mem_gb": 0.98
+    },
+    {
+      "batch": 2,
+      "mode": "policy",
+      "n": 30,
+      "median_ms": 262.72,
+      "p90_ms": 272.01,
+      "min_ms": 219.35,
+      "per_frame_ms": 131.36,
+      "throughput_fps": 7.6,
+      "peak_mem_gb": 1.01
+    },
+    {
+      "batch": 4,
+      "mode": "policy",
+      "n": 30,
+      "median_ms": 263.25,
+      "p90_ms": 276.68,
+      "min_ms": 229.57,
+      "per_frame_ms": 65.81,
+      "throughput_fps": 15.2,
+      "peak_mem_gb": 1.08
+    },
+    {
+      "batch": 8,
+      "mode": "policy",
+      "n": 30,
+      "median_ms": 249.29,
+      "p90_ms": 291.06,
+      "min_ms": 243.71,
+      "per_frame_ms": 31.16,
+      "throughput_fps": 32.1,
+      "peak_mem_gb": 1.22
+    },
+    {
+      "batch": 16,
+      "mode": "policy",
+      "n": 30,
+      "median_ms": 280.51,
+      "p90_ms": 286.44,
+      "min_ms": 274.94,
+      "per_frame_ms": 17.53,
+      "throughput_fps": 57.0,
+      "peak_mem_gb": 1.49
+    },
+    {
+      "batch": 1,
+      "mode": "e2e",
+      "n": 30,
+      "median_ms": 223.03,
+      "p90_ms": 226.75,
+      "min_ms": 220.75,
+      "per_frame_ms": 223.03,
+      "throughput_fps": 4.5,
+      "peak_mem_gb": 1.06
+    }
+  ]
+}

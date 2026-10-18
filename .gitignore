@@ -1,0 +1,39 @@
+# ---- 大体积产物（可由脚本重新生成）----
+data/
+outputs/
+logs/
+results/**/*.npz
+results/data_preview/
+results/**/*.png
+figs/__pycache__/
+figs/*.png
+figs/robustness.svg
+figs/traj_chart.svg
+figs/traj_compare.svg
+figs/gen_traj_compare.py
+
+# ---- 内部工作记录（不对外）----
+docs/
+reports/
+archive/
+configs/
+interview/
+INDEX.md
+REPORT.md
+EXPERIMENTS.md
+results/README.md
+scripts/explore/
+scripts/pi05_probe/
+env.local.sh
+
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.ipynb_checkpoints/
+
+# ---- 系统 / 临时 ----
+.DS_Store
+Thumbs.db
+*.tgz
