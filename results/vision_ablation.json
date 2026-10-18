@@ -1,0 +1,48 @@
+{
+  "ckpt": "outputs/expA_train40/checkpoints/040000/pretrained_model",
+  "stride": 5,
+  "frames": 552,
+  "episodes": "40-49",
+  "results": {
+    "clean": {
+      "n": 552,
+      "l1_step0": 3.379224679203353,
+      "l1_chunk": 8.087581918399403,
+      "elapsed_s": 146.7,
+      "ratio_step0": 1.0,
+      "ratio_chunk": 1.0
+    },
+    "black": {
+      "n": 552,
+      "l1_step0": 4.592822291496871,
+      "l1_chunk": 12.083979369073674,
+      "elapsed_s": 43.1,
+      "ratio_step0": 1.3591349281278398,
+      "ratio_chunk": 1.4941399655665175
+    },
+    "noise": {
+      "n": 552,
+      "l1_step0": 5.056078202698542,
+      "l1_chunk": 13.505148971858231,
+      "elapsed_s": 42.9,
+      "ratio_step0": 1.496224336255293,
+      "ratio_chunk": 1.6698624023991349
+    },
+    "swap": {
+      "n": 552,
+      "l1_step0": 4.299712154582359,
+      "l1_chunk": 12.344401237109434,
+      "elapsed_s": 37.2,
+      "ratio_step0": 1.272396056126108,
+      "ratio_chunk": 1.5263401795072624
+    },
+    "shuffle": {
+      "n": 552,
+      "l1_step0": 3.5425248959682127,
+      "l1_chunk": 8.835641501336426,
+      "elapsed_s": 37.8,
+      "ratio_step0": 1.0483247585666182,
+      "ratio_chunk": 1.0924948384430175
+    }
+  }
+}

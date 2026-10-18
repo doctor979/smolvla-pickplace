@@ -1,16 +1,23 @@
-"""平凡基线：不训练，直接用「当前状态」或「上一条动作」作为预测，与模型对比。
+"""平凡基线：不训练，直接用「当前观测」或「上一条指令」作为预测，与模型对比。
 
 动机：
     动作是绝对关节角，30 fps 下相邻帧位移很小，因此「预测下一帧 = 当前姿态」
     在单步 L1 上天然占优。若不与之对照，单步 L1 会系统性高估策略质量。
 
-两种平凡基线：
-    state_hold  : predict(t+k) = observation.state(t)      —— 把当前观测当动作
-    action_hold : predict(t+k) = action(t)                 —— 保持上一条指令不变
+三条基线，可用性不同，必须分开命名：
+    state_hold   : predict(t+k) = observation.state(t)   部署可用（本体感知）
+    action_hold  : predict(t+k) = action(t-1)            部署可用（自己上一条指令）
+    action_oracle: predict(t+k) = action(t)              **不可部署**，见下
+
+关于 action_oracle：
+    action(t) 就是本帧的标签，拿它当预测等于开卷考试；且 k=0 时误差恒为 0
+    （自己减自己），那一格没有意义。保留它只用于说明「示教动作有多平滑」，
+    计算时强制 k>=1，命名与 JSON 键都带 oracle，避免被当成真实基线引用。
 
 口径（与 d9_record.py 一致）：
     - 帧集：留出集 10 条 episode 的全部帧（2759 帧，stride=1）
     - 多步指标排除 episode 末尾越界项（t+k >= 该段长度）
+    - action_hold 排除每段首帧（无 t-1）
 
 Usage:
     python scripts/d10_baseline.py --ds-root <快照> \
@@ -18,7 +25,7 @@ Usage:
         --out results/baseline_static.json
 
 Output:
-    JSON：逐 k 的基线与各模型 L1、两种聚合口径（按 k 等权 / 按有效帧对加权）
+    JSON：逐 k 的三条基线与各模型 L1、按 k 等权的聚合值
 
 Notes:
     - 只读 parquet 的状态与动作，不解码视频，CPU 数十秒
@@ -105,14 +112,22 @@ def main():
 
     n = np.array([lengths[e] for e in ep])
     idx = np.arange(len(ep))
+    has_prev = t > 0                     # 每段首帧没有 t-1
 
-    state_hold, action_hold = {}, {}
+    state_hold, action_hold, action_oracle = {}, {}, {}
     models = {tag: {} for tag in runs}
     for k in range(50):
         m = (t + k) < n                       # 仍在同一 episode 内
         gt_k = action[idx[m] + k]
         state_hold[k] = float(np.abs(state[m] - gt_k).mean())
-        action_hold[k] = float(np.abs(action[m] - gt_k).mean())
+
+        mh = m & has_prev                     # 上一条指令可用
+        gt_h = action[idx[mh] + k]
+        action_hold[k] = float(np.abs(action[idx[mh] - 1] - gt_h).mean())
+
+        if k >= 1:                            # oracle 的 k=0 恒为 0，不计算
+            action_oracle[k] = float(np.abs(action[m] - gt_k).mean())
+
         for tag, r in runs.items():
             if k <= r["kmax"]:
                 models[tag][k] = float(np.abs(r["chunk"][m, k] - r["gt"][m, k]).mean())
@@ -125,40 +140,45 @@ def main():
         "protocol": {
             "episodes": eps,
             "frames": int(len(ep)),
-            "state_hold": "predict(t+k) = observation.state(t)",
-            "action_hold": "predict(t+k) = action(t)",
+            "state_hold": "predict(t+k) = observation.state(t)  [deployable]",
+            "action_hold": "predict(t+k) = action(t-1)  [deployable, first frame excluded]",
+            "action_oracle": "predict(t+k) = action(t)  [NOT deployable, k>=1 only]",
             "mask": "排除 t+k >= 该 episode 长度",
             "valid_k": {tag: r["kmax"] for tag, r in runs.items()},
         },
         "per_k": {"state_hold": state_hold, "action_hold": action_hold,
+                  "action_oracle": action_oracle,
                   **{tag: {str(k): v for k, v in d.items()} for tag, d in models.items()}},
         "aggregate": {
             "state_hold": {"k0": state_hold[0], "k1_9": mean_over(state_hold, 1, 9),
                            "k1_49": mean_over(state_hold, 1, 49)},
             "action_hold": {"k0": action_hold[0], "k1_9": mean_over(action_hold, 1, 9),
                             "k1_49": mean_over(action_hold, 1, 49)},
+            "action_oracle": {"k0": None, "k1_9": mean_over(action_oracle, 1, 9),
+                              "k1_49": mean_over(action_oracle, 1, 49)},
             **{tag: {"k0": d.get(0), "k1_9": mean_over(d, 1, 9), "k1_49": mean_over(d, 1, 49)}
                for tag, d in models.items()},
         },
     }
 
-    print("\n逐 k 单步/多步误差（同一批帧）")
-    head = ["static_state", "static_action"] + list(runs)
-    print("%-6s" % "k" + "".join("%14s" % h for h in head))
+    print("\n逐 k 误差（同一批帧；oracle 的 k=0 无意义故不列）")
+    head = ["state_hold", "action_hold", "action_oracle"] + list(runs)
+    print("%-6s" % "k" + "".join("%15s" % h for h in head))
     for k in [0, 1, 5, 9, 10, 25, 49]:
         row = "%-6d" % k
-        vals = [state_hold[k], action_hold[k]] + [models[tg].get(k) for tg in runs]
+        vals = [state_hold[k], action_hold[k], action_oracle.get(k)] + \
+               [models[tg].get(k) for tg in runs]
         for v in vals:
-            row += "%14s" % ("-" if v is None else "%.3f" % v)
+            row += "%15s" % ("-" if v is None else "%.3f" % v)
         print(row)
 
     print("\n聚合")
-    print("%-14s %8s %10s %10s" % ("", "k=0", "k=1..9", "k=1..49"))
+    print("%-15s %8s %10s %10s" % ("", "k=0", "k=1..9", "k=1..49"))
     for tag, v in out["aggregate"].items():
-        print("%-14s %8.3f %10s %10s" % (
-            tag, v["k0"],
-            "%.3f" % v["k1_9"] if v["k1_9"] is not None else "-",
-            "%.3f" % v["k1_49"] if v["k1_49"] is not None else "-"))
+        print("%-15s %8s %10s %10s" % (
+            tag, "-" if v["k0"] is None else "%.3f" % v["k0"],
+            "-" if v["k1_9"] is None else "%.3f" % v["k1_9"],
+            "-" if v["k1_49"] is None else "%.3f" % v["k1_49"]))
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as f:
