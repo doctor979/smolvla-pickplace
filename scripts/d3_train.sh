@@ -5,6 +5,7 @@
 #     bash scripts/d3_train.sh ignition   100 步点火，验证参数与显存
 #     bash scripts/d3_train.sh A          40 条训练集，40k 步（主线）
 #     bash scripts/d3_train.sh B          30 条训练集（数据量消融）
+#     bash scripts/d3_train.sh A 1001     同上，但换随机种子（输出目录自动加 _seed1001）
 #
 # 必填参数说明:
 #     --rename_map            模型声明 camera1/2/3，数据集只有 up/side，不映射会报错
@@ -19,14 +20,18 @@ MODEL=$ROOT/data/models/smolvla_base
 DS=lerobot/svla_so101_pickplace
 
 MODE=$1
+SEED=${2:-1000}
 case "$MODE" in
   ignition) STEPS=100;   SAVE=100;   EVAL=0;    OUT=$ROOT/outputs/ignition;   EXTRA="--dataset.eval_split=0.2" ;;
   A)        STEPS=40000; SAVE=5000; EVAL=2000; OUT=$ROOT/outputs/expA_train40; EXTRA="--dataset.eval_split=0.2" ;;
   B)        STEPS=40000; SAVE=5000; EVAL=0;    OUT=$ROOT/outputs/expB_train30; EXTRA="--dataset.episodes=[$(seq -s, 0 29)]" ;;
-  *) echo "用法: $0 ignition|A|B"; exit 2 ;;
+  *) echo "用法: $0 ignition|A|B [seed]"; exit 2 ;;
 esac
 
-echo "=== 任务=$MODE  步数=$STEPS  输出=$OUT ==="
+# 非默认种子另开目录，避免覆盖主线存档
+[ "$SEED" != "1000" ] && OUT="${OUT}_seed${SEED}"
+
+echo "=== 任务=$MODE  seed=$SEED  步数=$STEPS  输出=$OUT ==="
 date
 echo "--- 开跑前 GPU ---"
 nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader | head -1
@@ -44,7 +49,7 @@ $BIN/lerobot-train \
   --eval_steps=$EVAL \
   --log_freq=20 \
   --num_workers=4 \
-  --seed=1000 \
+  --seed=$SEED \
   --policy.push_to_hub=false \
   --policy.device=cuda \
   --wandb.enable=false
