@@ -190,7 +190,8 @@ def main():
     results = {}
     for variant in variants:
         t0 = time.time()
-        s0, scm, sca, nm = 0.0, 0.0, 0.0, 0
+        s0, sca, nm = 0.0, 0.0, 0
+        scm_sum, scm_cnt = 0.0, 0            # 排除 padding 的池化累加
         gen = torch.Generator(device="cpu").manual_seed(args.seed)
 
         for start in range(0, N, bs):
@@ -230,17 +231,21 @@ def main():
                 s0 += float(d[0].mean())
                 sca += float(d.mean())          # 含 padding（旧口径）
                 if len_arr is not None:
-                    valid_len = int(len_arr[i] - t_of[i])      # 本帧还能看到的真实步数
+                    # 只统计 t+k 仍在段内的步；按 (帧,步) 对池化，避免给末尾截断块额外权重
+                    valid_len = int(len_arr[i] - t_of[i])
                     keep = np.arange(m) < valid_len
-                    scm += float(d[keep].mean()) if keep.any() else 0.0
+                    if keep.any():
+                        scm_sum += float(d[keep].sum())
+                        scm_cnt += int(keep.sum()) * d.shape[1]
                 else:
-                    scm += float(d.mean())
+                    scm_sum += float(d.sum())
+                    scm_cnt += d.size
                 nm += 1
 
         results[variant] = {
             "n": nm,
             "l1_step0": s0 / nm,
-            "l1_chunk_pad_excluded": scm / nm,
+            "l1_chunk_pad_excluded": (scm_sum / scm_cnt) if scm_cnt else None,
             "l1_chunk_all": sca / nm,
             "elapsed_s": round(time.time() - t0, 1),
         }
