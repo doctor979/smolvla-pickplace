@@ -1,0 +1,16 @@
+{
+  "run": "A40k",
+  "frames": 2759,
+  "table": {
+    "full_2759|pad=included|agg=pair_weighted": 8.11828899383545,
+    "full_2759|pad=included|agg=equal_k": 8.11828899383545,
+    "full_2759|pad=excluded|agg=pair_weighted": 8.737427711486816,
+    "full_2759|pad=excluded|agg=equal_k": 8.900633811950684,
+    "stride5_552|pad=included|agg=pair_weighted": 8.096281051635742,
+    "stride5_552|pad=included|agg=equal_k": 8.096282005310059,
+    "stride5_552|pad=excluded|agg=pair_weighted": 8.71550178527832,
+    "stride5_552|pad=excluded|agg=equal_k": 8.878888130187988
+  },
+  "unified": 8.900633811950684,
+  "unified_definition": "全量帧 + 排除 t+k>=段长 + 按预测步长等权"
+}

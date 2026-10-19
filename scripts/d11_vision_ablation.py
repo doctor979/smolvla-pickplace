@@ -1,28 +1,32 @@
-"""视觉消融：把输入图像破坏掉，看动作误差涨多少 —— 即模型到底用了多少视觉信息。
+"""输入消融：破坏图像或本体状态，看动作误差涨多少 —— 判断模型依赖哪一路输入。
 
-五种输入条件（其余一切不变）：
-    clean    原图
-    black    全零（像素空间的纯黑）
-    noise    均匀随机噪声
-    swap     两路相机互换（up <-> side，画面真实但视角错配）
-    shuffle  同批次内图像后移一格（每帧看到相邻帧的画面，时序错配）
+八种输入条件（其余一切不变）：
+    clean        原图 + 原始状态
+    black        图像全零（像素空间）
+    noise        图像为均匀随机噪声
+    swap         两路相机互换（画面真实但视角错配）
+    shuffle_near 同批次内图像后移一格（stride=5 时约 0.17 s，局部错帧）
+    shuffle_far  使用数据集另一端的画面（跨 episode，秒级以上错帧）
+    state_zero   本体状态置零
+    state_far    本体状态换成另一段的（时序完全错配）
 
 为什么需要这一组：
-    d7_robustness 只做了「遮挡/模糊」这类**保留大部分信息**的扰动，误差只涨 10–30%。
-    如果模型其实主要靠本体感知（关节角）在走，那么视觉再怎么坏都不该有大变化。
-    把图像彻底毁掉才能回答：它是不是在有视觉输入的情况下也接近「盲开」。
+    d7_robustness 只做了遮挡/模糊这类**保留大部分信息**的扰动，误差仅涨 10–30%。
+    要判断模型靠视觉还是靠本体感知，必须把每一路**分别**破坏，再看哪边掉得更狠——
+    单向破坏无法换算成贡献比例，双向对照可以排出相对重要性。
+
+口径（与 d10_baseline / d12_chunk_protocol 统一）：
+    动作块 L1 = 排除 action_is_pad 标记的补零步，在 6 个关节与剩余步上取均值。
+    同时保留「包含 padding」的数值（l1_chunk_all），便于与旧结果对照。
 
 Usage:
     python scripts/d11_vision_ablation.py --ckpt <ckpt> --ds-root <快照> \
         --out results/vision_ablation.json [--stride 5] [--batch-size 8]
 
-Output:
-    JSON：每个条件下 n / 单步 L1 / 动作块 L1，以及相对 clean 的倍率
-
 Notes:
-    - stride 默认 5（552 帧）以控制耗时；结论是相对比较，抽样不影响方向
-    - black/noise 作用在**像素空间**（预处理之前），swap 交换原始通道
-    - shuffle 在批次维度上滚动，等价于「每帧看别人的画面」，不需要重复解码视频
+    - stride 默认 5（552 帧）；结论是条件之间的相对比较，抽样不影响方向
+    - black/noise 作用在像素空间（预处理之前）；state 类作用在原始观测上
+    - shuffle_far / state_far 需要额外载入远端样本，解码开销约翻倍
     - 每个 batch 前固定随机种子，使 flow matching 的采样噪声在各条件间一致
 """
 import argparse
@@ -39,7 +43,9 @@ os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 RENAME = {"observation.images.up": "observation.images.camera1",
           "observation.images.side": "observation.images.camera2"}
 CAMS = ["observation.images.up", "observation.images.side"]
-VARIANTS = ["clean", "black", "noise", "swap", "shuffle"]
+STATE = "observation.state"
+VARIANTS = ["clean", "black", "noise", "swap", "shuffle_near", "shuffle_far",
+            "state_zero", "state_far"]
 
 
 def to_tensor(x):
@@ -61,8 +67,8 @@ def stack_batch(ps):
     return out
 
 
-def corrupt(sample, variant, gen):
-    """在像素空间破坏图像；返回新的 sample（不修改原对象）。"""
+def corrupt(sample, variant, far, gen):
+    """按条件改写输入；far 为远端样本（shuffle_far / state_far 时提供）。"""
     if variant == "clean":
         return sample
     s = dict(sample)
@@ -78,6 +84,15 @@ def corrupt(sample, variant, gen):
         up, side = s.get(CAMS[0]), s.get(CAMS[1])
         if up is not None and side is not None:
             s[CAMS[0]], s[CAMS[1]] = side, up
+    elif variant == "shuffle_far" and far is not None:
+        for c in CAMS:
+            if c in s and c in far:
+                s[c] = far[c]
+    elif variant == "state_zero":
+        if STATE in s:
+            s[STATE] = torch.zeros_like(s[STATE])
+    elif variant == "state_far" and far is not None and STATE in far:
+        s[STATE] = far[STATE]
     return s
 
 
@@ -93,19 +108,21 @@ def main():
     ap.add_argument("--batch-size", type=int, default=8)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--seed", type=int, default=1000)
+    ap.add_argument("--variants", default=",".join(VARIANTS))
     ap.add_argument("--out", default="results/vision_ablation.json")
     args = ap.parse_args()
 
     a, b = args.episodes.split("-")
     eps = list(range(int(a), int(b) + 1))
     bs = max(1, args.batch_size)
+    variants = [v.strip() for v in args.variants.split(",") if v.strip()]
 
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
     from lerobot.policies.factory import make_policy, make_pre_post_processors
     from lerobot.policies.smolvla.configuration_smolvla import SmolVLAConfig
 
     print("=" * 62, flush=True)
-    print("D11 视觉消融  episodes=%s stride=%d bs=%d" % (args.episodes, args.stride, bs), flush=True)
+    print("D11 输入消融  episodes=%s stride=%d bs=%d" % (args.episodes, args.stride, bs), flush=True)
 
     dts = {"action": [i / float(args.fps) for i in range(args.chunk_size)]}
     if args.ds_root:
@@ -125,6 +142,33 @@ def main():
     policy.to(args.device)
     policy.eval()
 
+    # 每帧的段长与段内序号：用于排除「t+k 越界」的补零步。
+    # 注意 action_is_pad 在本数据集里不足以标出全部越界步（实测掩码几乎无效），
+    # 因此按 episode 长度自行计算，与 d12_chunk_protocol.py 保持同一口径。
+    lens, ep_of, t_of, len_arr = None, None, None, None
+    try:
+        df = ds.meta.episodes.to_pandas()
+        if "episode_index" in df.columns:
+            df = df[df["episode_index"].isin(eps)].sort_values("episode_index")
+        if "dataset_from_index" in df.columns and "dataset_to_index" in df.columns:
+            lens = [(int(r["dataset_to_index"]) - int(r["dataset_from_index"]))
+                    for _, r in df.iterrows()]
+        elif "length" in df.columns:
+            lens = [int(x) for x in df["length"].tolist()]
+    except Exception as e:
+        print("  meta.episodes 读取失败(%s)" % type(e).__name__, flush=True)
+
+    if lens and len(lens) == len(eps) and sum(lens) == len(ds):
+        ep_of, t_of = [], []
+        for e, n_ep in zip(eps, lens):
+            ep_of += [e] * n_ep
+            t_of += list(range(n_ep))
+        ep_of, t_of = np.array(ep_of), np.array(t_of)
+        len_arr = np.array([lens[eps.index(e)] for e in ep_of])
+        print("  段长映射: %d 帧 / %d 段" % (len(ep_of), len(lens)), flush=True)
+    else:
+        print("  !! 段长映射失败，动作块指标退化为「含 padding」", flush=True)
+
     pp_ov = {
         "device_processor": {"device": args.device},
         "normalizer_processor": {"features": {**cfg.input_features, **cfg.output_features},
@@ -140,20 +184,25 @@ def main():
                                          dataset_stats=ds.meta.stats)
 
     idxs = list(range(0, len(ds), args.stride))
-    print("  评估帧数: %d" % len(idxs), flush=True)
+    N = len(idxs)
+    print("  评估帧数: %d" % N, flush=True)
 
     results = {}
-    for variant in VARIANTS:
+    for variant in variants:
         t0 = time.time()
-        s0, sc, n = 0.0, 0.0, 0
+        s0, scm, sca, nm = 0.0, 0.0, 0.0, 0
         gen = torch.Generator(device="cpu").manual_seed(args.seed)
 
-        for start in range(0, len(idxs), bs):
+        for start in range(0, N, bs):
             sel = idxs[start:start + bs]
-            prepared = []
-            for i in sel:
-                sample = ds[i]
-                sample = corrupt(sample, variant, gen)
+            need_far = variant in ("shuffle_far", "state_far")
+            far = [ds[idxs[(start + j + N // 2) % N]] for j in range(len(sel))] if need_far else None
+
+            prepared, raws = [], []
+            for j, i in enumerate(sel):
+                raw = ds[i]                      # 只解码一次，后面算真值时复用
+                raws.append(raw)
+                sample = corrupt(raw, variant, far[j] if need_far else None, gen)
                 obs = {RENAME.get(k, k): v for k, v in sample.items()
                        if k not in ("action", "action_is_pad")}
                 bb = pre(obs)
@@ -161,8 +210,8 @@ def main():
                                  for k, v in bb.items()})
             batch = stack_batch(prepared)
 
-            # 时序错配：批次内图像后移一格（每帧看到相邻帧的画面）
-            if variant == "shuffle" and len(sel) > 1:
+            # 局部错帧：批次内滚动一格（stride=5 时约 0.17 s）
+            if variant == "shuffle_near" and len(sel) > 1:
                 for c in ("observation.images.camera1", "observation.images.camera2"):
                     if c in batch:
                         batch[c] = torch.roll(batch[c], 1, dims=0)
@@ -175,32 +224,45 @@ def main():
             ch = ch.float().cpu().numpy()
 
             for j, i in enumerate(sel):
-                gt = ds[i]["action"].float().reshape(-1, 6).numpy()
+                gt = raws[j]["action"].float().reshape(-1, 6).numpy()
                 m = min(ch[j].shape[0], gt.shape[0])
-                d = ch[j][:m] - gt[:m]
-                s0 += float(np.abs(d[0]).mean())
-                sc += float(np.abs(d).mean())
-                n += 1
+                d = np.abs(ch[j][:m] - gt[:m])
+                s0 += float(d[0].mean())
+                sca += float(d.mean())          # 含 padding（旧口径）
+                if len_arr is not None:
+                    valid_len = int(len_arr[i] - t_of[i])      # 本帧还能看到的真实步数
+                    keep = np.arange(m) < valid_len
+                    scm += float(d[keep].mean()) if keep.any() else 0.0
+                else:
+                    scm += float(d.mean())
+                nm += 1
 
-        results[variant] = {"n": n, "l1_step0": s0 / n, "l1_chunk": sc / n,
-                            "elapsed_s": round(time.time() - t0, 1)}
-        print("  %-8s 单步 L1=%6.3f  动作块 L1=%7.3f  (%d 帧, %.0fs)"
-              % (variant, results[variant]["l1_step0"], results[variant]["l1_chunk"],
-                 n, results[variant]["elapsed_s"]), flush=True)
+        results[variant] = {
+            "n": nm,
+            "l1_step0": s0 / nm,
+            "l1_chunk_pad_excluded": scm / nm,
+            "l1_chunk_all": sca / nm,
+            "elapsed_s": round(time.time() - t0, 1),
+        }
+        print("  %-13s 单步 %.3f  动作块(排pad) %.3f  动作块(含pad) %.3f  (%.0fs)"
+              % (variant, results[variant]["l1_step0"],
+                 results[variant]["l1_chunk_pad_excluded"],
+                 results[variant]["l1_chunk_all"], results[variant]["elapsed_s"]), flush=True)
 
-    base = results["clean"]["l1_step0"]
-    basec = results["clean"]["l1_chunk"]
-    for v in results.values():
-        v["ratio_step0"] = v["l1_step0"] / base
-        v["ratio_chunk"] = v["l1_chunk"] / basec
+    c = results.get("clean")
+    if c:
+        for v in results.values():
+            v["ratio_step0"] = v["l1_step0"] / c["l1_step0"]
+            v["ratio_chunk"] = v["l1_chunk_pad_excluded"] / c["l1_chunk_pad_excluded"]
+        print("\n相对 clean 的倍率（动作块口径：已排除 padding）")
+        print("%-13s %10s %10s" % ("条件", "单步", "动作块"))
+        for k, v in results.items():
+            print("%-13s %9.2fx %9.2fx" % (k, v["ratio_step0"], v["ratio_chunk"]))
 
-    print("\n相对 clean 的倍率（1.0 = 图像完全不起作用）")
-    print("%-8s %10s %10s" % ("条件", "单步", "动作块"))
-    for k, v in results.items():
-        print("%-8s %9.2fx %9.2fx" % (k, v["ratio_step0"], v["ratio_chunk"]))
-
-    out = {"ckpt": args.ckpt, "stride": args.stride, "frames": len(idxs),
-           "episodes": args.episodes, "results": results}
+    out = {"ckpt": args.ckpt, "stride": args.stride, "frames": N,
+           "episodes": args.episodes,
+           "protocol": "动作块 L1 排除 action_is_pad；同时给含 padding 的旧口径",
+           "results": results}
     d = os.path.dirname(os.path.abspath(args.out))
     if d:
         os.makedirs(d, exist_ok=True)

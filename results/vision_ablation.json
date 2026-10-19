@@ -3,46 +3,79 @@
   "stride": 5,
   "frames": 552,
   "episodes": "40-49",
+  "protocol": "动作块 L1 排除 action_is_pad；同时给含 padding 的旧口径",
   "results": {
     "clean": {
       "n": 552,
       "l1_step0": 3.379224679203353,
-      "l1_chunk": 8.087581918399403,
-      "elapsed_s": 146.7,
+      "l1_chunk_pad_excluded": 8.058559411677761,
+      "l1_chunk_all": 8.087581918399403,
+      "elapsed_s": 113.0,
       "ratio_step0": 1.0,
       "ratio_chunk": 1.0
     },
     "black": {
       "n": 552,
       "l1_step0": 4.592822291496871,
-      "l1_chunk": 12.083979369073674,
-      "elapsed_s": 43.1,
+      "l1_chunk_pad_excluded": 11.85058510173922,
+      "l1_chunk_all": 12.083979369073674,
+      "elapsed_s": 40.4,
       "ratio_step0": 1.3591349281278398,
-      "ratio_chunk": 1.4941399655665175
+      "ratio_chunk": 1.4705587557704651
     },
     "noise": {
       "n": 552,
       "l1_step0": 5.056078202698542,
-      "l1_chunk": 13.505148971858231,
-      "elapsed_s": 42.9,
+      "l1_chunk_pad_excluded": 12.961890156934226,
+      "l1_chunk_all": 13.505148971858231,
+      "elapsed_s": 43.3,
       "ratio_step0": 1.496224336255293,
-      "ratio_chunk": 1.6698624023991349
+      "ratio_chunk": 1.6084624428220986
     },
     "swap": {
       "n": 552,
       "l1_step0": 4.299712154582359,
-      "l1_chunk": 12.344401237109434,
+      "l1_chunk_pad_excluded": 12.233904233337313,
+      "l1_chunk_all": 12.344401237109434,
       "elapsed_s": 37.2,
       "ratio_step0": 1.272396056126108,
-      "ratio_chunk": 1.5263401795072624
+      "ratio_chunk": 1.5181254624255802
     },
-    "shuffle": {
+    "shuffle_near": {
       "n": 552,
       "l1_step0": 3.5425248959682127,
-      "l1_chunk": 8.835641501336426,
-      "elapsed_s": 37.8,
+      "l1_chunk_pad_excluded": 8.74245572090149,
+      "l1_chunk_all": 8.835641501336426,
+      "elapsed_s": 37.4,
       "ratio_step0": 1.0483247585666182,
-      "ratio_chunk": 1.0924948384430175
+      "ratio_chunk": 1.0848658270400893
+    },
+    "shuffle_far": {
+      "n": 552,
+      "l1_step0": 3.8901527865749337,
+      "l1_chunk_pad_excluded": 10.329482586163541,
+      "l1_chunk_all": 10.516505225197129,
+      "elapsed_s": 43.5,
+      "ratio_step0": 1.1511968442098475,
+      "ratio_chunk": 1.2818026223390444
+    },
+    "state_zero": {
+      "n": 552,
+      "l1_step0": 31.088390929111537,
+      "l1_chunk_pad_excluded": 26.09630917898123,
+      "l1_chunk_all": 24.670601126940355,
+      "elapsed_s": 37.3,
+      "ratio_step0": 9.199859103905627,
+      "ratio_chunk": 3.238334278601301
+    },
+    "state_far": {
+      "n": 552,
+      "l1_step0": 13.808021322756574,
+      "l1_chunk_pad_excluded": 12.816867015176062,
+      "l1_chunk_all": 12.649706331716068,
+      "elapsed_s": 42.7,
+      "ratio_step0": 4.086150710171717,
+      "ratio_chunk": 1.5904662806857237
     }
   }
 }
