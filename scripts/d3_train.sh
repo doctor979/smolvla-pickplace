@@ -7,6 +7,10 @@
 #     bash scripts/d3_train.sh B          30 条训练集（数据量消融）
 #     bash scripts/d3_train.sh A 1001     同上，但换随机种子（输出目录自动加 _seed1001）
 #
+# 环境变量 NUM_WORKERS 控制 dataloader 进程数（默认 4）。同一份 NFS 上并行跑多条训练时
+# 要调小：8 个 worker 并发读曾触发 NFS 请求挂死（worker 卡 rpc_wait_bit_killable，
+# 主进程卡 pipe_write，GPU 空转）。并行两条时设 2。
+#
 # 必填参数说明:
 #     --rename_map            模型声明 camera1/2/3，数据集只有 up/side，不映射会报错
 #     --policy.push_to_hub=false  push_to_hub 默认为 true，否则报 repo_id missing
@@ -16,7 +20,7 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/env.sh"
 ROOT="${PROJECT_ROOT}"
 BIN="${BIN:?未设置 BIN：请先 source env.sh（或激活 conda 环境）}"
-MODEL=$ROOT/data/models/smolvla_base
+MODEL=${MODEL_PATH:-$ROOT/data/models/smolvla_base}
 DS=lerobot/svla_so101_pickplace
 
 MODE=$1
@@ -33,8 +37,8 @@ esac
 
 echo "=== 任务=$MODE  seed=$SEED  步数=$STEPS  输出=$OUT ==="
 date
-echo "--- 开跑前 GPU ---"
-nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader | head -1
+echo "--- 开跑前 GPU（按 CUDA_VISIBLE_DEVICES 查询）---"
+nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader -i "${CUDA_VISIBLE_DEVICES:-0}"
 
 $BIN/lerobot-train \
   --dataset.repo_id=$DS \
@@ -48,7 +52,7 @@ $BIN/lerobot-train \
   --save_freq=$SAVE \
   --eval_steps=$EVAL \
   --log_freq=20 \
-  --num_workers=4 \
+  --num_workers=${NUM_WORKERS:-4} \
   --seed=$SEED \
   --policy.push_to_hub=false \
   --policy.device=cuda \
@@ -56,6 +60,6 @@ $BIN/lerobot-train \
 
 RC=$?
 echo "=== 退出码=$RC ==="
-echo "--- 结束后 GPU ---"
-nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader | head -1
+echo "--- 结束后 GPU（按 CUDA_VISIBLE_DEVICES 查询）---"
+nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader -i "${CUDA_VISIBLE_DEVICES:-0}"
 exit $RC
